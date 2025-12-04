@@ -111,9 +111,24 @@ def predict_price_movement(data, threshold_price=None):
     data['SMA_10'] = data['Close'].rolling(window=10).mean()
     data['RSI'] = calculate_rsi(data['Close'], 14)
     
+    # MACD
+    macd_line, signal_line, macd_histogram = calculate_macd(data['Close'])
+    data['MACD'] = macd_line
+    data['MACD_Signal'] = signal_line
+    data['MACD_Histogram'] = macd_histogram
+    
+    # Bollinger Bands
+    bb_upper, bb_middle, bb_lower = calculate_bollinger_bands(data['Close'])
+    data['BB_Upper'] = bb_upper
+    data['BB_Middle'] = bb_middle
+    data['BB_Lower'] = bb_lower
+    
     # Price momentum
     price_change = data['Close'].pct_change()
     recent_momentum = price_change.tail(5).mean()
+    
+    # Inside Bar Detection (reversal signal)
+    inside_bar_signal, volatility_reduction = detect_inside_bar(data)
     
     # Recent volume trend (last 10 candles)
     recent_buying = data['Buying_Volume'].tail(10).sum()
@@ -128,7 +143,7 @@ def predict_price_movement(data, threshold_price=None):
     # Calculate net volume
     net_volume = total_buying - total_selling
     
-    # PRIMARY SIGNAL: Net Volume (most important)
+    # PRIMARY SIGNAL: Net Volume (most important) - 40% weight
     if net_volume > 0:  # Positive net volume = more buyers
         volume_ratio = total_buying / total_selling if total_selling > 0 else 10
         if volume_ratio > 2.0:  # Buyers dominating heavily (2x or more)
@@ -162,6 +177,46 @@ def predict_price_movement(data, threshold_price=None):
         else:  # Moderate selling
             bearish_signals += 1
     
+    # MACD SIGNAL - 30% weight (3 signals)
+    if not pd.isna(data['MACD'].iloc[-1]) and not pd.isna(data['MACD_Signal'].iloc[-1]):
+        macd_current = data['MACD'].iloc[-1]
+        macd_signal_current = data['MACD_Signal'].iloc[-1]
+        macd_histogram = data['MACD_Histogram'].iloc[-1]
+        
+        # MACD crossover
+        if macd_current > macd_signal_current:  # Bullish crossover
+            if macd_histogram > 0:  # Strong bullish
+                bullish_signals += 3
+            else:  # Moderate bullish
+                bullish_signals += 2
+        else:  # Bearish crossover
+            if macd_histogram < 0:  # Strong bearish
+                bearish_signals += 3
+            else:  # Moderate bearish
+                bearish_signals += 2
+    
+    # BOLLINGER BANDS SIGNAL - 30% weight (3 signals)
+    if not pd.isna(data['BB_Upper'].iloc[-1]) and not pd.isna(data['BB_Lower'].iloc[-1]):
+        bb_upper = data['BB_Upper'].iloc[-1]
+        bb_lower = data['BB_Lower'].iloc[-1]
+        bb_middle = data['BB_Middle'].iloc[-1]
+        
+        # Calculate position within bands
+        bb_range = bb_upper - bb_lower
+        if bb_range > 0:
+            price_position = (current_price - bb_lower) / bb_range
+            
+            if price_position > 0.8:  # Near upper band - overbought
+                bearish_signals += 3  # Likely to come down
+            elif price_position > 0.6:  # Above middle, heading to upper
+                bearish_signals += 1
+            elif price_position < 0.2:  # Near lower band - oversold
+                bullish_signals += 3  # Likely to bounce up
+            elif price_position < 0.4:  # Below middle, heading to lower
+                bullish_signals += 1
+            else:  # In the middle - neutral
+                pass  # No signal
+    
     # Recent volume trend (last 10 candles)
     if recent_buying_pct > 52:
         bullish_signals += 2
@@ -188,6 +243,16 @@ def predict_price_movement(data, threshold_price=None):
         elif data['RSI'].iloc[-1] > 70:
             bearish_signals += 1
     
+    # INSIDE BAR REVERSAL SIGNAL (2 signals for reversal detection)
+    if inside_bar_signal == 'BULLISH_REVERSAL':
+        bullish_signals += 2  # Strong reversal signal
+    elif inside_bar_signal == 'BEARISH_REVERSAL':
+        bearish_signals += 2  # Strong reversal signal
+    elif inside_bar_signal == 'BULLISH_CONTINUATION':
+        bullish_signals += 1  # Trend continuation
+    elif inside_bar_signal == 'BEARISH_CONTINUATION':
+        bearish_signals += 1  # Trend continuation
+    
     prediction = 'ABOVE' if bullish_signals > bearish_signals else 'BELOW'
     
     # Calculate confidence based on signal strength
@@ -201,6 +266,17 @@ def predict_price_movement(data, threshold_price=None):
     elif volume_dominance > 10:  # Clear volume signal
         confidence = min(confidence + 10, 90)
     
+    # Get MACD values for return
+    macd_value = float(data['MACD'].iloc[-1]) if not pd.isna(data['MACD'].iloc[-1]) else None
+    macd_signal_value = float(data['MACD_Signal'].iloc[-1]) if not pd.isna(data['MACD_Signal'].iloc[-1]) else None
+    
+    # Get Bollinger Band position
+    bb_position = None
+    if not pd.isna(data['BB_Upper'].iloc[-1]) and not pd.isna(data['BB_Lower'].iloc[-1]):
+        bb_range = data['BB_Upper'].iloc[-1] - data['BB_Lower'].iloc[-1]
+        if bb_range > 0:
+            bb_position = float((current_price - data['BB_Lower'].iloc[-1]) / bb_range * 100)
+    
     return {
         'current_price': current_price,
         'threshold_price': float(threshold_price),
@@ -213,7 +289,12 @@ def predict_price_movement(data, threshold_price=None):
         'buying_percentage': float(buying_percentage),
         'selling_percentage': float(selling_percentage),
         'recent_buying_percentage': float(recent_buying_pct),
-        'net_volume': float(net_volume)
+        'net_volume': float(net_volume),
+        'macd': macd_value,
+        'macd_signal': macd_signal_value,
+        'bb_position': bb_position,
+        'inside_bar': inside_bar_signal,
+        'volatility_reduction': float(volatility_reduction) if volatility_reduction else None
     }
 
 def calculate_rsi(prices, period=14):
@@ -225,6 +306,77 @@ def calculate_rsi(prices, period=14):
     rs = gain / loss
     rsi = 100 - (100 / (1 + rs))
     return rsi
+
+def calculate_macd(prices, fast=12, slow=26, signal=9):
+    """Calculate MACD indicator"""
+    ema_fast = prices.ewm(span=fast, adjust=False).mean()
+    ema_slow = prices.ewm(span=slow, adjust=False).mean()
+    macd_line = ema_fast - ema_slow
+    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+    histogram = macd_line - signal_line
+    
+    return macd_line, signal_line, histogram
+
+def calculate_bollinger_bands(prices, period=20, std_dev=2):
+    """Calculate Bollinger Bands"""
+    sma = prices.rolling(window=period).mean()
+    std = prices.rolling(window=period).std()
+    upper_band = sma + (std * std_dev)
+    lower_band = sma - (std * std_dev)
+    
+    return upper_band, sma, lower_band
+
+def detect_inside_bar(data):
+    """Detect Inside Bar pattern for reversal signals"""
+    if len(data) < 2:
+        return None, None
+    
+    # Get last two candles
+    current = data.iloc[-1]
+    previous = data.iloc[-2]
+    
+    # Inside Bar: Current candle is completely within previous candle's range
+    is_inside_bar = (current['High'] <= previous['High'] and 
+                     current['Low'] >= previous['Low'])
+    
+    if not is_inside_bar:
+        return None, None
+    
+    # Determine direction based on close position and previous trend
+    inside_bar_signal = None
+    
+    # Check if we have enough data for trend
+    if len(data) >= 3:
+        prev_prev = data.iloc[-3]
+        
+        # Uptrend with inside bar (potential bearish reversal)
+        if previous['Close'] > prev_prev['Close']:
+            # If current closes near bottom of inside bar = bearish reversal
+            inside_bar_range = current['High'] - current['Low']
+            close_position = (current['Close'] - current['Low']) / inside_bar_range if inside_bar_range > 0 else 0.5
+            
+            if close_position < 0.4:  # Closing near bottom
+                inside_bar_signal = 'BEARISH_REVERSAL'
+            elif close_position > 0.6:  # Closing near top (continuation)
+                inside_bar_signal = 'BULLISH_CONTINUATION'
+        
+        # Downtrend with inside bar (potential bullish reversal)
+        elif previous['Close'] < prev_prev['Close']:
+            # If current closes near top of inside bar = bullish reversal
+            inside_bar_range = current['High'] - current['Low']
+            close_position = (current['Close'] - current['Low']) / inside_bar_range if inside_bar_range > 0 else 0.5
+            
+            if close_position > 0.6:  # Closing near top
+                inside_bar_signal = 'BULLISH_REVERSAL'
+            elif close_position < 0.4:  # Closing near bottom (continuation)
+                inside_bar_signal = 'BEARISH_CONTINUATION'
+    
+    # Calculate volatility reduction
+    current_range = current['High'] - current['Low']
+    previous_range = previous['High'] - previous['Low']
+    volatility_reduction = (previous_range - current_range) / previous_range * 100 if previous_range > 0 else 0
+    
+    return inside_bar_signal, volatility_reduction
 
 def prepare_chart_data(data, symbol_name):
     """Prepare data for charting"""

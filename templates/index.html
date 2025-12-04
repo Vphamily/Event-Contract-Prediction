@@ -408,6 +408,40 @@
             padding-bottom: 10px;
             border-bottom: 2px solid #e0e0e0;
         }
+        
+        .pattern-badge {
+            display: inline-block;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+            margin-top: 5px;
+        }
+        
+        .pattern-badge.bullish-reversal {
+            background: linear-gradient(135deg, #4CAF50, #66BB6A);
+            color: white;
+            box-shadow: 0 2px 4px rgba(76, 175, 80, 0.3);
+        }
+        
+        .pattern-badge.bearish-reversal {
+            background: linear-gradient(135deg, #f44336, #EF5350);
+            color: white;
+            box-shadow: 0 2px 4px rgba(244, 67, 54, 0.3);
+        }
+        
+        .pattern-badge.bullish-continuation {
+            background: linear-gradient(135deg, #2196F3, #42A5F5);
+            color: white;
+            box-shadow: 0 2px 4px rgba(33, 150, 243, 0.3);
+        }
+        
+        .pattern-badge.bearish-continuation {
+            background: linear-gradient(135deg, #FF9800, #FFA726);
+            color: white;
+            box-shadow: 0 2px 4px rgba(255, 152, 0, 0.3);
+        }
     </style>
 </head>
 <body>
@@ -614,6 +648,19 @@
                                 <div class="stat-label">RSI</div>
                                 <div class="stat-value">${pred.rsi ? pred.rsi.toFixed(1) : 'N/A'}</div>
                             </div>
+                            ${pred.inside_bar && pred.inside_bar !== 'NONE' ? `
+                            <div class="stat-box" style="grid-column: 1 / -1;">
+                                <div class="stat-label">📊 Pattern Detected</div>
+                                <div class="pattern-badge ${pred.inside_bar.toLowerCase().replace('_', '-')}">
+                                    ${pred.inside_bar.replace('_', ' ')}
+                                </div>
+                                ${pred.volatility_reduction ? `
+                                <div style="font-size: 11px; color: #666; margin-top: 5px;">
+                                    Volatility: -${pred.volatility_reduction.toFixed(1)}%
+                                </div>
+                                ` : ''}
+                            </div>
+                            ` : ''}
                         </div>
                     </div>
                     
