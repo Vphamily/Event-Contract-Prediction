@@ -442,6 +442,18 @@
             color: white;
             box-shadow: 0 2px 4px rgba(255, 152, 0, 0.3);
         }
+        
+        .pattern-badge.uptrend {
+            background: linear-gradient(135deg, #4CAF50, #66BB6A);
+            color: white;
+            box-shadow: 0 2px 4px rgba(76, 175, 80, 0.3);
+        }
+        
+        .pattern-badge.downtrend {
+            background: linear-gradient(135deg, #f44336, #EF5350);
+            color: white;
+            box-shadow: 0 2px 4px rgba(244, 67, 54, 0.3);
+        }
     </style>
 </head>
 <body>
@@ -451,8 +463,10 @@
         <div class="controls">
             <button onclick="loadData('SPX', '5m')" class="active" id="spx-5m">SPX - 5 Min</button>
             <button onclick="loadData('SPX', '15m')" id="spx-15m">SPX - 15 Min</button>
+            <button onclick="loadData('SPX', '30m')" id="spx-30m">SPX - 30 Min</button>
             <button onclick="loadData('NDX', '5m')" id="ndx-5m">NDX - 5 Min</button>
             <button onclick="loadData('NDX', '15m')" id="ndx-15m">NDX - 15 Min</button>
+            <button onclick="loadData('NDX', '30m')" id="ndx-30m">NDX - 30 Min</button>
             <button onclick="compareIntervals('SPX')">Compare SPX</button>
             <button onclick="compareIntervals('NDX')">Compare NDX</button>
             <button onclick="togglePredictionForm()" style="background: #FF9800; color: white;">🎯 Price Target</button>
@@ -522,6 +536,11 @@
         
         function loadData(symbol, interval) {
             setActiveButton(symbol, interval);
+            
+            // Hide prediction form and show content
+            document.getElementById('predictionForm').style.display = 'none';
+            document.getElementById('content').style.display = 'block';
+            
             document.getElementById('content').innerHTML = '<div class="loading">Loading data...</div>';
             
             console.log(`Loading data for ${symbol} ${interval}...`);
@@ -548,6 +567,11 @@
         
         function compareIntervals(symbol) {
             document.querySelectorAll('button').forEach(btn => btn.classList.remove('active'));
+            
+            // Hide prediction form and show content
+            document.getElementById('predictionForm').style.display = 'none';
+            document.getElementById('content').style.display = 'block';
+            
             document.getElementById('content').innerHTML = '<div class="loading">Loading comparison data...</div>';
             
             fetch(`/api/compare/${symbol}`)
@@ -648,6 +672,14 @@
                                 <div class="stat-label">RSI</div>
                                 <div class="stat-value">${pred.rsi ? pred.rsi.toFixed(1) : 'N/A'}</div>
                             </div>
+                            ${pred.supertrend_signal ? `
+                            <div class="stat-box">
+                                <div class="stat-label">🎯 Supertrend</div>
+                                <div class="pattern-badge ${pred.supertrend_signal.toLowerCase().replace('_', '-')}" style="font-size: 10px; padding: 4px 8px;">
+                                    ${pred.supertrend_signal.replace('_', ' ')}
+                                </div>
+                            </div>
+                            ` : ''}
                             ${pred.inside_bar && pred.inside_bar !== 'NONE' ? `
                             <div class="stat-box" style="grid-column: 1 / -1;">
                                 <div class="stat-label">📊 Pattern Detected</div>
